@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 from typing import AsyncIterable
 from contextlib import asynccontextmanager
 
@@ -14,13 +15,25 @@ from agent import run_analysis_stream, run_qa_stream, MissingAPIKeyError
 
 
 def _sse_event(event: str, data: str) -> str:
-    lines = []
-    if event:
-        lines.append(f"event: {event}")
+    lines = [f"event: {event}"] if event else []
     for line in data.split("\n"):
         lines.append(f"data: {line}")
     lines.append("")
     return "\n".join(lines)
+
+
+async def _with_keepalive(agen, interval: int = 10):
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(agen.__anext__(), timeout=interval)
+                yield item
+            except asyncio.TimeoutError:
+                yield _sse_event("progress", json.dumps(
+                    {"step": "ping", "status": "running", "message": ""}
+                ))
+    except StopAsyncIteration:
+        pass
 
 
 @asynccontextmanager
@@ -90,6 +103,16 @@ async def analyze_repo(
             if not force:
                 cached = get_cached_analysis(repo_url, commit)
                 if cached:
+                    cached["tech_stack"] = (
+                        json.loads(cached["tech_stack"])
+                        if isinstance(cached.get("tech_stack"), str)
+                        else cached.get("tech_stack", [])
+                    )
+                    cached["tree"] = (
+                        json.loads(cached["tree"])
+                        if isinstance(cached.get("tree"), str)
+                        else cached.get("tree", {})
+                    )
                     yield _sse_event("progress", json.dumps(
                         {"step": "cached", "status": "done",
                          "message": "该版本已分析过，直接加载缓存!",
@@ -128,11 +151,12 @@ async def analyze_repo(
             yield _sse_event("error", json.dumps({"message": str(e)}, ensure_ascii=False))
 
     return StreamingResponse(
-        event_stream(),
+        _with_keepalive(event_stream()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
         },
     )
 
@@ -158,11 +182,12 @@ async def chat_with_project(
             yield _sse_event("error", json.dumps({"message": str(e)}, ensure_ascii=False))
 
     return StreamingResponse(
-        chat_stream(),
+        _with_keepalive(chat_stream()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
         },
     )
 

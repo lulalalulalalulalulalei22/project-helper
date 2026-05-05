@@ -14,9 +14,14 @@ const steps = [
   { key: 'summary', label: '生成报告' },
 ]
 
+// Filter out ping keep-alive events
+const filteredProgress = computed(() => {
+  return props.progress.filter(p => p.step !== 'ping')
+})
+
 const progressMap = computed(() => {
   const map = {}
-  for (const p of props.progress) {
+  for (const p of filteredProgress.value) {
     map[p.step] = p
   }
   return map
@@ -34,6 +39,13 @@ function stepMessage(key) {
   const s = progressMap.value[key]
   return s?.message || ''
 }
+
+// Latest analysis-phase message for live display
+const analysisMsg = computed(() => {
+  const s = progressMap.value['analysis']
+  if (!s || s.status !== 'running') return ''
+  return s.message || ''
+})
 </script>
 
 <template>
@@ -53,7 +65,13 @@ function stepMessage(key) {
         </div>
         <div class="step-content">
           <span class="step-label">{{ step.label }}</span>
-          <span v-if="stepMessage(step.key)" class="step-msg">{{ stepMessage(step.key) }}</span>
+          <span v-if="step.key !== 'analysis' && stepMessage(step.key)" class="step-msg">
+            {{ stepMessage(step.key) }}
+          </span>
+          <!-- Analysis phase: live tool-call messages -->
+          <span v-if="step.key === 'analysis' && analysisMsg" class="step-live">
+            {{ analysisMsg }}
+          </span>
         </div>
       </div>
     </div>
@@ -77,9 +95,26 @@ function stepMessage(key) {
 .step-check { color: var(--accent-2); font-weight: bold; }
 .step-error { color: var(--danger); }
 .step-pending { color: var(--border); font-size: 10px; }
-.step-content { display: flex; flex-direction: column; }
+.step-content { display: flex; flex-direction: column; min-width: 0; }
 .step-label { font-size: 14px; font-weight: 600; }
 .step-msg { font-size: 12px; color: var(--text-3); margin-top: 1px; }
+
+/* Live tool-call message: gray italic with gentle pulse */
+.step-live {
+  font-size: 12px;
+  color: var(--text-3);
+  font-style: italic;
+  margin-top: 2px;
+  animation: livePulse 1.8s ease-in-out infinite;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 .progress-error {
   margin-top: 16px; padding: 12px; background: rgba(255, 92, 122, 0.1);
   border-radius: var(--radius-sm); color: var(--danger); font-size: 13px;

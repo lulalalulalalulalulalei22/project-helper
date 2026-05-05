@@ -96,6 +96,24 @@ def tool_get_key_files() -> str:
     return "\n".join(get_key_files(_current_repo_dir))
 
 
+_tool_labels = {
+    "tool_read_file": "📖 正在读取文件",
+    "tool_search_code": "🔍 正在搜索代码",
+    "tool_list_directory": "📂 正在浏览目录",
+    "tool_get_tree": "🌲 正在生成目录树",
+    "tool_get_key_files": "🔑 正在识别关键文件",
+    "read_file": "📖 正在读取",
+    "search_code": "🔍 正在搜索",
+    "list_directory": "📂 正在浏览",
+    "get_tree": "🌲 正在生成树",
+    "get_key_files": "🔑 正在识别",
+}
+
+
+def _tool_action_name(name: str) -> str:
+    return _tool_labels.get(name, f"🤖 正在执行: {name}")
+
+
 def _format_tree(tree: dict, indent: int = 0) -> str:
     lines = []
     for name, children in tree.items():
@@ -210,15 +228,18 @@ Format the report in Markdown. Be specific and cite file paths."""
             stream_mode=["updates"],
             version="v2",
         ):
-            for source, update in chunk.get("data", {}).items():
+            # v2 chunks are (namespace, data) tuples
+            data = chunk[1] if isinstance(chunk, tuple) else chunk.get("data", chunk)
+            for source, update in data.items():
                 last_msg = update.get("messages", [None])[-1]
                 if last_msg is None:
                     continue
                 msg_type = getattr(last_msg, "type", None)
                 if msg_type == "tool":
                     tool_name = getattr(last_msg, "name", "unknown")
+                    action = _tool_action_name(tool_name)
                     yield {"step": "analysis", "status": "running",
-                           "message": f"AI 正在查看: {tool_name}..."}
+                           "message": f"{action}..."}
                 elif msg_type == "ai":
                     content = getattr(last_msg, "content", "")
                     if isinstance(content, str) and len(content) > len(report):
