@@ -4,6 +4,10 @@ import shutil
 from urllib.parse import urlparse
 from config import REPOS_DIR, IGNORED_DIRS, IGNORED_EXTENSIONS
 
+# Windows 默认编码是 GBK，Git 输出常常含 UTF-8 字符（emoji 等）
+# 统一用 UTF-8 + replace，防止 UnicodeDecodeError 导致 subprocess 线程崩溃
+_SUBPROCESS_KW = {"encoding": "utf-8", "errors": "replace", "text": True}
+
 
 def get_repo_name(repo_url: str) -> str:
     path = urlparse(repo_url).path.rstrip("/")
@@ -23,12 +27,12 @@ def clone_repo(repo_url: str) -> str:
             shutil.rmtree(target_dir)
         except PermissionError:
             subprocess.run(["cmd", "/c", "rmdir", "/s", "/q", target_dir],
-                           capture_output=True, timeout=30)
+                           capture_output=True, timeout=30, **_SUBPROCESS_KW)
             if os.path.exists(target_dir):
                 shutil.rmtree(target_dir, ignore_errors=True)
     subprocess.run(
         ["git", "clone", "--depth", "1", repo_url, target_dir],
-        capture_output=True, text=True, timeout=300
+        capture_output=True, timeout=300, **_SUBPROCESS_KW
     )
     return target_dir
 
@@ -36,7 +40,7 @@ def clone_repo(repo_url: str) -> str:
 def get_commit_hash(repo_dir: str) -> str:
     result = subprocess.run(
         ["git", "-C", repo_dir, "rev-parse", "HEAD"],
-        capture_output=True, text=True, timeout=10
+        capture_output=True, timeout=10, **_SUBPROCESS_KW
     )
     return result.stdout.strip()
 
@@ -92,12 +96,11 @@ def read_file_content(repo_dir: str, relative_path: str) -> str:
 
 
 def search_in_files(repo_dir: str, pattern: str, glob_pattern: str = "*") -> str:
-    # Try ripgrep first
     try:
         result = subprocess.run(
             ["rg", "--line-number", "--max-count=3", "--no-heading",
              "--max-filesize=500K", "-g", glob_pattern, pattern, repo_dir],
-            capture_output=True, text=True, timeout=15
+            capture_output=True, timeout=15, **_SUBPROCESS_KW
         )
         output = result.stdout.strip()
         if output:
@@ -106,11 +109,10 @@ def search_in_files(repo_dir: str, pattern: str, glob_pattern: str = "*") -> str
     except FileNotFoundError:
         pass
 
-    # Fallback: use grep or Python search
     try:
         result = subprocess.run(
             ["grep", "-rn", "--include=" + glob_pattern, "-m", "3", pattern, repo_dir],
-            capture_output=True, text=True, timeout=15
+            capture_output=True, timeout=15, **_SUBPROCESS_KW
         )
         output = result.stdout.strip()
         if output:
@@ -174,7 +176,6 @@ def get_key_files(repo_dir: str) -> list:
         fp = os.path.join(repo_dir, f)
         if os.path.isfile(fp):
             key_files.append(f)
-    # Also find main source directories
     src_dirs = ["src", "lib", "app", "core", "pkg", "cmd", "internal",
                 "main", "api", "controllers", "models", "views", "routes",
                 "services", "utils", "handlers", "middleware"]
