@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProgressPanel from '../components/ProgressPanel.vue'
 import ReportView from '../components/ReportView.vue'
@@ -12,8 +12,17 @@ const report = ref('')
 const tree = ref({})
 const progress = ref([])
 const analyzing = ref(false)
+const loading = ref(false)
 const error = ref('')
 const eventSource = ref(null)
+
+const displayState = computed(() => {
+  if (error.value && !report.value) return 'error'
+  if (report.value && !analyzing.value) return 'report'
+  if (analyzing.value) return 'analyzing'
+  if (loading.value) return 'loading'
+  return 'empty'
+})
 
 function startAnalysis(repoUrl) {
   analyzing.value = true
@@ -31,13 +40,21 @@ function startAnalysis(repoUrl) {
     const data = JSON.parse(e.data)
     progress.value.push(data)
 
+    if (data.step === 'error') {
+      error.value = data.message || '分析过程出错'
+      analyzing.value = false
+      es.close()
+      return
+    }
     if (data.step === 'cached' && data.status === 'done') {
       const cached = data.data
+      let stack = cached.tech_stack
+      if (typeof stack === 'string') stack = JSON.parse(stack)
       project.value = {
         id: cached.id,
         repo_url: cached.repo_url,
         project_name: cached.project_name,
-        tech_stack: cached.tech_stack,
+        tech_stack: stack,
       }
       report.value = cached.report
       tree.value = cached.tree || {}
@@ -73,19 +90,19 @@ function startAnalysis(repoUrl) {
   es.addEventListener('error', (e) => {
     try {
       const data = JSON.parse(e.data)
-      error.value = data.message || '分析过程出错'
+      if (data.message) {
+        error.value = data.message
+      }
     } catch {
-      // EventSource error events don't always have parseable data
+      // network errors have no parseable data — onerror will handle
     }
-    if (!report.value) {
-      analyzing.value = false
-    }
-    es.close()
   })
 
   es.onerror = () => {
-    if (analyzing.value && !report.value) {
-      error.value = '连接中断，请确认后端服务已启动'
+    if (!report.value) {
+      if (!error.value) {
+        error.value = '连接中断，请确认后端服务已启动'
+      }
       analyzing.value = false
     }
     es.close()
@@ -93,6 +110,7 @@ function startAnalysis(repoUrl) {
 }
 
 async function loadProject(id) {
+  loading.value = true
   try {
     const res = await fetch(`/api/projects/${id}`)
     if (!res.ok) throw new Error('Project not found')
@@ -102,6 +120,8 @@ async function loadProject(id) {
     router.replace(`/analysis/${id}`)
   } catch (e) {
     error.value = '加载项目失败: ' + e.message
+  } finally {
+    loading.value = false
   }
 }
 
@@ -125,22 +145,36 @@ onUnmounted(() => {
 
 <template>
   <div class="analysis-page container">
-    <!-- Not started yet -->
-    <div v-if="!route.params.id && !route.query.repo_url && !analyzing && !report" class="empty-state">
+    <!-- Empty -->
+    <div v-if="displayState === 'empty'" class="empty-state">
       <div class="empty-icon">&#128270;</div>
       <h2>输入 GitHub 仓库地址开始分析</h2>
       <p>在首页输入仓库地址，或点击上方"首页"返回</p>
     </div>
 
+    <!-- Loading -->
+    <div v-if="displayState === 'loading'" class="loading-state">
+      <div class="spinner"></div>
+      <p>加载项目数据...</p>
+    </div>
+
     <!-- Analyzing -->
     <ProgressPanel
-      v-if="analyzing"
+      v-if="displayState === 'analyzing'"
       :progress="progress"
       :error="error"
     />
 
+    <!-- Error -->
+    <div v-if="displayState === 'error'" class="error-card card">
+      <div class="error-icon">&#9888;</div>
+      <h3>分析失败</h3>
+      <p>{{ error }}</p>
+      <router-link to="/" class="btn btn-secondary">返回首页</router-link>
+    </div>
+
     <!-- Report -->
-    <div v-if="report && !analyzing" class="report-section animate-in">
+    <div v-if="displayState === 'report'" class="report-section animate-in">
       <div class="report-header">
         <div>
           <h1 class="project-title">{{ project?.project_name || '' }}</h1>
@@ -158,12 +192,6 @@ onUnmounted(() => {
         <ReportView :report="report" />
       </div>
     </div>
-
-    <!-- Error -->
-    <div v-if="error && !analyzing && !report" class="error-card card">
-      <p>{{ error }}</p>
-      <router-link to="/" class="btn btn-secondary" style="margin-top:16px;">返回首页</router-link>
-    </div>
   </div>
 </template>
 
@@ -173,6 +201,14 @@ onUnmounted(() => {
 .empty-icon { font-size: 48px; margin-bottom: 16px; }
 .empty-state h2 { font-size: 22px; margin-bottom: 8px; }
 .empty-state p { color: var(--text-2); }
+.loading-state { text-align: center; padding: 80px 20px; }
+.loading-state p { color: var(--text-2); margin-top: 20px; font-size: 14px; }
+.spinner {
+  width: 36px; height: 36px; margin: 0 auto;
+  border: 3px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .report-section { max-width: 900px; margin: 0 auto; }
 .report-header {
   display: flex; justify-content: space-between; align-items: flex-start;
@@ -183,5 +219,8 @@ onUnmounted(() => {
 .project-url { font-size: 13px; color: var(--text-3); font-family: var(--font-mono); }
 .report-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .btn-qa { text-decoration: none; }
-.error-card { text-align: center; padding: 40px; color: var(--danger); max-width: 500px; margin: 60px auto; }
+.error-card { text-align: center; padding: 40px; max-width: 500px; margin: 60px auto; }
+.error-icon { font-size: 36px; margin-bottom: 12px; }
+.error-card h3 { font-size: 18px; color: var(--danger); margin-bottom: 8px; }
+.error-card p { color: var(--text-2); font-size: 14px; margin-bottom: 20px; }
 </style>

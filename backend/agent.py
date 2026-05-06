@@ -228,8 +228,7 @@ Format the report in Markdown. Be specific and cite file paths."""
             stream_mode=["updates"],
             version="v2",
         ):
-            # v2 chunks are (namespace, data) tuples
-            data = chunk[1] if isinstance(chunk, tuple) else chunk.get("data", chunk)
+            data = chunk[1] if isinstance(chunk, tuple) else chunk.get("data", {})
             for source, update in data.items():
                 last_msg = update.get("messages", [None])[-1]
                 if last_msg is None:
