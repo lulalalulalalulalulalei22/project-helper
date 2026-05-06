@@ -189,7 +189,7 @@ onUnmounted(() => {
       </div>
 
       <div class="report-layout">
-        <ReportView :report="report" />
+        <ReportView :report="report" :project-name="project?.project_name || ''" />
       </div>
     </div>
   </div>

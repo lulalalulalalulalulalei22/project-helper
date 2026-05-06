@@ -323,16 +323,19 @@ async def run_qa_stream(repo_dir: str, question: str,
             stream_mode=["messages", "updates"],
             version="v2",
         ):
-            if chunk.get("type") == "messages":
-                token, metadata = chunk["data"]
+            mode = chunk[0] if isinstance(chunk, tuple) else chunk.get("type", "")
+            data = chunk[1] if isinstance(chunk, tuple) else chunk.get("data", {})
+
+            if mode == "messages":
+                token, metadata = data
                 if hasattr(token, "text") and token.text:
                     yield {"type": "text", "content": token.text}
                 if hasattr(token, "tool_call_chunks") and token.tool_call_chunks:
                     for tc in token.tool_call_chunks:
                         if hasattr(tc, "name") and tc.name:
                             yield {"type": "tool_start", "content": tc.name}
-            elif chunk.get("type") == "updates":
-                for source, update in chunk["data"].items():
+            elif mode == "updates":
+                for source, update in data.items():
                     last_msg = update.get("messages", [None])[-1]
                     if last_msg and hasattr(last_msg, "type") and last_msg.type == "tool":
                         yield {"type": "tool_result",

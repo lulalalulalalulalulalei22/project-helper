@@ -114,7 +114,12 @@ async function send() {
     es.onerror = () => {
       if (sending.value) {
         const lastMsg = messages.value[messages.value.length - 1]
-        if (lastMsg) lastMsg.streaming = false
+        if (lastMsg) {
+          lastMsg.streaming = false
+          if (!lastMsg.content) {
+            lastMsg.content = '请求失败，请确认后端服务已启动'
+          }
+        }
         sending.value = false
       }
       es.close()
